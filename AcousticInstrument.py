@@ -435,6 +435,12 @@ class Acoustic:
     beta: float
 
     global_size: int
+    front_board_index_offset: int
+    back_board_index_offset: int
+    bridge_index_offset: int
+    post_index_offset: int
+    string_index_offset: int
+
     global_M: FloatMatrix
     global_K: FloatMatrix
 
@@ -490,6 +496,8 @@ class Acoustic:
             num_node = tuning.num_node
         )
 
+        self.simulation = simulation
+
         self.assemble_instrument()
         self.analyze_vibration()
 
@@ -534,49 +542,49 @@ class Acoustic:
         string_dim = self.string.num_node
 
         self.global_size = front_board_dim + back_board_dim + bridge_dim + post_dim + string_dim
-        front_board_index_offset = 0
-        back_board_index_offset = front_board_index_offset + front_board_dim
-        bridge_index_offset = back_board_index_offset + back_board_dim
-        post_index_offset = bridge_index_offset + bridge_dim
-        string_index_offset = post_index_offset + post_dim
+        self.front_board_index_offset = 0
+        self.back_board_index_offset = self.front_board_index_offset + front_board_dim
+        self.bridge_index_offset = self.back_board_index_offset + back_board_dim
+        self.post_index_offset = self.bridge_index_offset + bridge_dim
+        self.string_index_offset = self.post_index_offset + post_dim
 
         bridge_board_spring_constant = (self.front_board.k * self.bridge.K_bulk) / (self.front_board.k + self.bridge.K_bulk) / len(self.bridge.location_tuple)
         post_board_spring_constant = (self.front_board.k * self.post.K_bulk) / (self.front_board.k + self.post.K_bulk) / len(self.post.location_tuple)
         string_bridge_spring_constant = (self.string.eq_k * self.bridge.K_bulk) / (self.string.eq_k + self.bridge.K_bulk)
 
         bridge_front_conn = global_connection_matrix(
-            self.global_size, front_board_index_offset, bridge_index_offset,
+            self.global_size, self.front_board_index_offset, self.bridge_index_offset,
             self.front_board.interior_elements_tuple,
             self.bridge.location_tuple,
             bridge_board_spring_constant
         )
                                                     
         bridge_back_conn = global_connection_matrix(
-            self.global_size, back_board_index_offset, bridge_index_offset,
+            self.global_size, self.back_board_index_offset, self.bridge_index_offset,
             self.back_board.interior_elements_tuple,
             self.bridge.location_tuple,
             bridge_board_spring_constant
         )
 
         post_front_conn = global_connection_matrix(
-            self.global_size, front_board_index_offset, post_index_offset,
+            self.global_size, self.front_board_index_offset, self.post_index_offset,
             self.front_board.interior_elements_tuple,
             self.post.location_tuple,
             post_board_spring_constant
         )
 
         post_back_conn = global_connection_matrix(
-            self.global_size, back_board_index_offset, post_index_offset,
+            self.global_size, self.back_board_index_offset, self.post_index_offset,
             self.back_board.interior_elements_tuple,
             self.post.location_tuple,
             post_board_spring_constant
         )
 
         string_bridge_conn = np.zeros((self.global_size, self.global_size))
-        string_bridge_conn[string_index_offset, string_index_offset] += string_bridge_spring_constant
-        string_bridge_conn[bridge_index_offset, bridge_index_offset] += string_bridge_spring_constant
-        string_bridge_conn[string_index_offset, bridge_index_offset] -= string_bridge_spring_constant
-        string_bridge_conn[bridge_index_offset, string_index_offset] -= string_bridge_spring_constant
+        string_bridge_conn[self.string_index_offset, self.string_index_offset] += string_bridge_spring_constant
+        string_bridge_conn[self.bridge_index_offset, self.bridge_index_offset] += string_bridge_spring_constant
+        string_bridge_conn[self.string_index_offset, self.bridge_index_offset] -= string_bridge_spring_constant
+        string_bridge_conn[self.bridge_index_offset, self.string_index_offset] -= string_bridge_spring_constant
 
         self.global_M = block_diag(front_board_M, back_board_M, bridge_M, post_M, string_M)
         self.global_K = block_diag(front_board_K, back_board_K, bridge_K, post_K, string_K) + bridge_front_conn + bridge_back_conn + post_front_conn + post_back_conn + string_bridge_conn
@@ -588,10 +596,11 @@ class Acoustic:
         self.nat_freq, self.mode_shapes = eig(self.global_K, self.global_M)
         self.nat_freq = np.sqrt(self.nat_freq)
 
-    def element_response(self):
+    def diag_state_response(self):
 
-        #TODO
-
+        time_step = 1/self.simulation.sampling_rate
+        time_series = np.arange(0, self.simulation.simulation_period, time_step)
+        
         if self.string.input_type == Acoustic.BOW:
             pass
         
@@ -599,7 +608,16 @@ class Acoustic:
             pass
 
         elif self.string.input_type == Acoustic.PLUCK:
-            pass
+        
+            initial_condition_vector =  
+            diag_initial_condition_vector = 
+
+            input_matrix = 
+            diag_input_matrix =
+
+        return
+    
+    def element_response(self):
 
         return
     
