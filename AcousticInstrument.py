@@ -441,6 +441,8 @@ class Acoustic:
     mode_shapes: FloatMatrix
     nat_freq: FloatMatrix
 
+    time_series_response: FloatMatrix
+
     # Input Type Flags
     PLUCK = 0
     TAP = 1
@@ -449,25 +451,47 @@ class Acoustic:
 
     def __init__(self, design: Geometry, material: Material, tuning: StringTuning, simulation: Simulation):
         
-        self.front_board = self.FrontBoard(material.front_board_m, material.front_board_k,
-                                           material.front_board_diag_spring_ratio,
-                                           design.wall_profile,
-                                           design.board_profile,
-                                           design.holes_profile)
+        self.front_board = self.FrontBoard(
+            m = material.front_board_m,
+            k = material.front_board_k,
+            diag_spring_ratio = material.front_board_diag_spring_ratio,
+            wall_pixel_data = design.wall_profile,
+            interior_pixel_data = design.board_profile,
+            hole_pixel_data = design.holes_profile
+        )
 
-        self.back_board = self.BackBoard(material.back_board_m, material.back_board_k,
-                                           material.back_board_diag_spring_ratio,
-                                           design.wall_profile,
-                                           design.board_profile)
+        self.back_board = self.BackBoard(
+            m = material.back_board_m,
+            k = material.back_board_k,
+            diag_spring_ratio = material.back_board_diag_spring_ratio,
+            wall_pixel_data = design.wall_profile,
+            interior_pixel_data = design.board_profile
+        )
 
-        self.bridge = self.Bridge(material.bridge_k, material.bridge_m, design.bridge_location)
+        self.bridge = self.Bridge(
+            K_bulk = material.bridge_k,
+            M_bulk = material.bridge_m,
+            bridge_location_image = design.bridge_location
+        )
 
-        self.post = self.Post(material.post_k, material.post_m, design.post_location)
+        self.post = self.Post(
+            K_bulk = material.post_k,
+            M_bulk = material.post_m,
+            post_location_image = design.post_location
+        )
 
-        self.string = self.String()
+        self.string = self.String(
+            string_tension = tuning.string_tension,
+            string_mass_per_length = tuning.string_mass_per_length,
+            note_location = tuning.note_location,
+            input_type = tuning.input_type,
+            input_fractional_location = tuning.input_fractional_location,
+            input_amplitude = tuning.input_amplitude,
+            num_node = tuning.num_node
+        )
 
         self.assemble_instrument()
-        self.analyze_vibration_response()
+        self.analyze_vibration()
 
         return
 
@@ -559,21 +583,24 @@ class Acoustic:
 
         return
     
-    def analyze_vibration_response(self):
+    def analyze_vibration(self):
 
         self.nat_freq, self.mode_shapes = eig(self.global_K, self.global_M)
         self.nat_freq = np.sqrt(self.nat_freq)
 
     def element_response(self):
-        if 
-        return
-    
-    def calculate_sound_paths(self):
+
         #TODO
-        return
-    
-    def calculate_time_delay(self):
-        #TODO
+
+        if self.string.input_type == Acoustic.BOW:
+            pass
+        
+        elif self.string.input_type == Acoustic.TAP:
+            pass
+
+        elif self.string.input_type == Acoustic.PLUCK:
+            pass
+
         return
     
     def superimpose_sound_sources(self):
