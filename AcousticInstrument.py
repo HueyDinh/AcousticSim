@@ -2,7 +2,7 @@ from multiprocessing import connection
 from multiprocessing.sharedctypes import Value
 import numpy as np
 import numpy.typing as npt
-from scipy.linalg import block_diag
+from scipy.linalg import block_diag, eig
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import cv2
@@ -61,6 +61,7 @@ class Input:
     impulse_fractional_location: float
     impulse_amplitude: float
     simulation_period: float
+    sampling_rate: float = 44100
 
 
 # Define Abstract Concepts
@@ -418,11 +419,20 @@ class Acoustic:
     post: Post
     string: String
 
+    alpha: float
+    beta: float
+
     global_M: FloatMatrix
     global_K: FloatMatrix
 
-    alpha: float
-    beta: float
+    mode_shapes: FloatMatrix
+    nat_freq: FloatMatrix
+
+    # Input Type Flags
+    PLUCK = 0
+    TAP = 1
+    BOW = 2
+
 
     def __init__(self, design: Geometry, material: Material, tuning: StringTuning, input: Input):
         
@@ -445,12 +455,10 @@ class Acoustic:
                                   input.note_location, input.impulse_fractional_location, tuning.num_node)
 
         self.assemble_instrument()
+        self.analyze_vibration_response()
 
         return
 
-    def export_sound(self, export_path:str, input: Input):
-        #TODO
-        return
 
     def assemble_instrument(self):
 
@@ -540,6 +548,10 @@ class Acoustic:
 
         return
     
+    def analyze_vibration_response(self):
+
+        self.nat_freq, self.mode_shapes = eig(self.global_K, self.global_M)
+
     def system_response(self):
         #TODO
         return
@@ -556,6 +568,9 @@ class Acoustic:
         #TODO
         return
 
+    def export_sound(self, export_path:str, input: Input):
+        #TODO
+        return
 
 if __name__ == "__main__":
 
