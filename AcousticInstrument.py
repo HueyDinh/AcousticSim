@@ -1,5 +1,3 @@
-from multiprocessing import connection
-from multiprocessing.sharedctypes import Value
 import numpy as np
 import numpy.typing as npt
 from scipy.linalg import block_diag, eig
@@ -18,8 +16,8 @@ class Material:
 
     front_board_k: float
     back_board_k: float
-    front_board_diag_spring_ratio: float
-    back_board_diag_spring_ratio: float
+    front_board_k_diag: float
+    back_board_k_diag: float
     post_k: float
     bridge_k: float
 
@@ -100,11 +98,11 @@ class Acoustic:
         interior_elements_tuple: CoordList
 
         k: float
+        k_diag: float
         m: float
-        diag_spring_ratio: float
 
         def __init__(self, m: float, k: float,
-                     diag_spring_ratio: float,
+                     k_diag: float,
                      wall_pixel_data: Int8GreyScaleImg,
                      interior_pixel_data: Int8GreyScaleImg):
 
@@ -113,7 +111,7 @@ class Acoustic:
 
             self.m = m
             self.k = k
-            self.diag_spring_ratio = diag_spring_ratio
+            self.k_diag = k_diag
 
             self.parse_pixel_array()
             self.assemble_M()
@@ -174,13 +172,13 @@ class Acoustic:
                     if diag_adj_coord in self.interior_elements_tuple:
 
                         diag_adj_index = self.interior_elements_tuple.index(diag_adj_coord)
-                        global_K[index,index] += self.k*self.diag_spring_ratio
-                        global_K[index,diag_adj_index] -= self.k/2 * self.diag_spring_ratio
-                        global_K[diag_adj_index,index] -= self.k/2 * self.diag_spring_ratio
+                        global_K[index,index] += self.k_diag
+                        global_K[index,diag_adj_index] -= self.k_diag/2
+                        global_K[diag_adj_index,index] -= self.k_diag/2
                     
                     if diag_adj_coord in self.wall_elements_tuple:
 
-                        global_K[index,index] += self.k * self.diag_spring_ratio
+                        global_K[index,index] += self.k_diag
             
             self.K_matrix = global_K
             
@@ -199,11 +197,11 @@ class Acoustic:
         hole_elements_tuple: CoordList
 
         k: float
+        k_diag: float
         m: float
-        diag_spring_ratio: float
 
         def __init__(self, m: float, k: float,
-                     diag_spring_ratio: float,
+                     k_diag: float,
                      wall_pixel_data: Int8GreyScaleImg,
                      interior_pixel_data: Int8GreyScaleImg,
                      hole_pixel_data: Int8GreyScaleImg):
@@ -214,7 +212,7 @@ class Acoustic:
 
             self.m = m
             self.k = k
-            self.diag_spring_ratio = diag_spring_ratio
+            self.k_diag = k_diag
 
             self.parse_pixel_array()
             self.assemble_M()
@@ -276,13 +274,13 @@ class Acoustic:
                     if diag_adj_coord in self.interior_elements_tuple:
 
                         diag_adj_index = self.interior_elements_tuple.index(diag_adj_coord)
-                        global_K[index,index] += self.k*self.diag_spring_ratio
-                        global_K[index,diag_adj_index] -= self.k/2 * self.diag_spring_ratio
-                        global_K[diag_adj_index,index] -= self.k/2 * self.diag_spring_ratio
+                        global_K[index,index] += self.k_diag
+                        global_K[index,diag_adj_index] -= self.k_diag/2
+                        global_K[diag_adj_index,index] -= self.k_diag/2
                     
                     if diag_adj_coord in self.wall_elements_tuple:
 
-                        global_K[index,index] += self.k * self.diag_spring_ratio
+                        global_K[index,index] += self.k_diag
             
             self.K_matrix = global_K
             
@@ -460,7 +458,7 @@ class Acoustic:
         self.front_board = self.FrontBoard(
             m = material.front_board_m,
             k = material.front_board_k,
-            diag_spring_ratio = material.front_board_diag_spring_ratio,
+            k_diag = material.front_board_k_diag,
             wall_pixel_data = design.wall_profile,
             interior_pixel_data = design.board_profile,
             hole_pixel_data = design.holes_profile
@@ -469,7 +467,7 @@ class Acoustic:
         self.back_board = self.BackBoard(
             m = material.back_board_m,
             k = material.back_board_k,
-            diag_spring_ratio = material.back_board_diag_spring_ratio,
+            k_diag = material.back_board_k_diag,
             wall_pixel_data = design.wall_profile,
             interior_pixel_data = design.board_profile
         )
@@ -609,7 +607,15 @@ class Acoustic:
 
         elif self.string.input_type == Acoustic.PLUCK:
         
-            initial_condition_vector =  
+            string_local_init_vector = np.array(range(self.string.num_node))
+            string_local_init_vector_2nd_half = string_local_init_vector
+
+            slope_pre = (self.string.input_amplitude)/(self.string.input_node_index)
+            slope_post = (-self.string.input_amplitude)/((self.string.num_node - 1) - (self.string.input_node_index + 1))
+
+
+
+            initial_condition_vector = 
             diag_initial_condition_vector = 
 
             input_matrix = 
@@ -640,8 +646,8 @@ if __name__ == "__main__":
     test_material = Material(
         front_board_k = 1,
         back_board_k = 1,
-        front_board_diag_spring_ratio = 0,
-        back_board_diag_spring_ratio = 0,
+        front_board_k_diag = 0,
+        back_board_k_diag = 0,
         post_k = 10,
         bridge_k = 5,
 
@@ -668,7 +674,7 @@ if __name__ == "__main__":
         string_tension = 71.7846,
         string_mass_per_length = 1.140e-3,
         note_location = 0.635,
-        input_type = Acoustic.BOW,
+        input_type = Acoustic.PLUCK,
         input_fractional_location = 0.5,
         input_amplitude = 1,
         num_node = 100
