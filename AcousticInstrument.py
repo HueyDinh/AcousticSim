@@ -51,15 +51,16 @@ class StringTuning:
 
     string_tension: float
     string_mass_per_length: float
+    note_location: float
+    input_type: int
+    input_fractional_location: float
+    input_amplitude: float
     num_node: int
 
 
 @dataclass
-class Input:
+class Simulation:
 
-    note_location: float
-    impulse_fractional_location: float
-    impulse_amplitude: float
     simulation_period: float
     sampling_rate: float = 44100
 
@@ -371,25 +372,36 @@ class Acoustic:
         string_tension: float
         string_mass_per_length: float
         note_location: float
-        impulse_fractional_location: float
-        impulse_node_index: float
+        input_type: int
+        input_fractional_location: float
+        input_amplitude: float
         num_node: int
 
         el_len: float
         eq_k: float
 
-        def __init__(self, string_tension: float, string_mass_per_length: float, note_location: float, impulse_fractional_location: float, num_node: int):
+
+        def __init__(
+            self, string_tension: float,
+            string_mass_per_length: float,
+            note_location: float,
+            input_type: int,
+            input_fractional_location: float,
+            input_amplitude: float,
+            num_node: int):
             
             self.string_tension = string_tension
             self.string_mass_per_length = string_mass_per_length
             self.note_location = note_location
-            self.impulse_fractional_location = impulse_fractional_location
+            self.input_type = input_type
+            self.input_fractional_location = input_fractional_location
+            self.input_amplitude = input_amplitude
             self.num_node = num_node
 
             self.el_len = self.note_location/(self.num_node + 1)
             self.eq_k = self.string_tension/self.el_len
             self.eq_m = self.string_mass_per_length*self.el_len
-            self.impulse_node_index = round(self.num_node * self.impulse_fractional_location)
+            self.input_node_index = round(self.num_node * self.input_fractional_location)
 
             self.assemble_M()
             self.assemble_K()
@@ -418,10 +430,11 @@ class Acoustic:
     bridge: Bridge
     post: Post
     string: String
-
+    simulation: Simulation
     alpha: float
     beta: float
 
+    global_size: int
     global_M: FloatMatrix
     global_K: FloatMatrix
 
@@ -434,7 +447,7 @@ class Acoustic:
     BOW = 2
 
 
-    def __init__(self, design: Geometry, material: Material, tuning: StringTuning, input: Input):
+    def __init__(self, design: Geometry, material: Material, tuning: StringTuning, simulation: Simulation):
         
         self.front_board = self.FrontBoard(material.front_board_m, material.front_board_k,
                                            material.front_board_diag_spring_ratio,
@@ -451,14 +464,12 @@ class Acoustic:
 
         self.post = self.Post(material.post_k, material.post_m, design.post_location)
 
-        self.string = self.String(tuning.string_tension, tuning.string_mass_per_length,
-                                  input.note_location, input.impulse_fractional_location, tuning.num_node)
+        self.string = self.String()
 
         self.assemble_instrument()
         self.analyze_vibration_response()
 
         return
-
 
     def assemble_instrument(self):
 
@@ -498,7 +509,7 @@ class Acoustic:
         post_dim = 1
         string_dim = self.string.num_node
 
-        global_size = front_board_dim + back_board_dim + bridge_dim + post_dim + string_dim
+        self.global_size = front_board_dim + back_board_dim + bridge_dim + post_dim + string_dim
         front_board_index_offset = 0
         back_board_index_offset = front_board_index_offset + front_board_dim
         bridge_index_offset = back_board_index_offset + back_board_dim
@@ -510,34 +521,34 @@ class Acoustic:
         string_bridge_spring_constant = (self.string.eq_k * self.bridge.K_bulk) / (self.string.eq_k + self.bridge.K_bulk)
 
         bridge_front_conn = global_connection_matrix(
-            global_size, front_board_index_offset, bridge_index_offset,
+            self.global_size, front_board_index_offset, bridge_index_offset,
             self.front_board.interior_elements_tuple,
             self.bridge.location_tuple,
             bridge_board_spring_constant
         )
                                                     
         bridge_back_conn = global_connection_matrix(
-            global_size, back_board_index_offset, bridge_index_offset,
+            self.global_size, back_board_index_offset, bridge_index_offset,
             self.back_board.interior_elements_tuple,
             self.bridge.location_tuple,
             bridge_board_spring_constant
         )
 
         post_front_conn = global_connection_matrix(
-            global_size, front_board_index_offset, post_index_offset,
+            self.global_size, front_board_index_offset, post_index_offset,
             self.front_board.interior_elements_tuple,
             self.post.location_tuple,
             post_board_spring_constant
         )
 
         post_back_conn = global_connection_matrix(
-            global_size, back_board_index_offset, post_index_offset,
+            self.global_size, back_board_index_offset, post_index_offset,
             self.back_board.interior_elements_tuple,
             self.post.location_tuple,
             post_board_spring_constant
         )
 
-        string_bridge_conn = np.zeros((global_size, global_size))
+        string_bridge_conn = np.zeros((self.global_size, self.global_size))
         string_bridge_conn[string_index_offset, string_index_offset] += string_bridge_spring_constant
         string_bridge_conn[bridge_index_offset, bridge_index_offset] += string_bridge_spring_constant
         string_bridge_conn[string_index_offset, bridge_index_offset] -= string_bridge_spring_constant
@@ -551,9 +562,10 @@ class Acoustic:
     def analyze_vibration_response(self):
 
         self.nat_freq, self.mode_shapes = eig(self.global_K, self.global_M)
+        self.nat_freq = np.sqrt(self.nat_freq)
 
-    def system_response(self):
-        #TODO
+    def element_response(self):
+        if 
         return
     
     def calculate_sound_paths(self):
@@ -568,7 +580,7 @@ class Acoustic:
         #TODO
         return
 
-    def export_sound(self, export_path:str, input: Input):
+    def export_sound(self, export_path:str, input: Simulation):
         #TODO
         return
 
@@ -606,17 +618,20 @@ if __name__ == "__main__":
         wall_height = 1,
         scale_factor = 1
     )
+
     test_tuning = StringTuning(
-        string_tension = 1,
-        string_mass_per_length = 1,
-        num_node = 1000
+        string_tension = 71.7846,
+        string_mass_per_length = 1.140e-3,
+        note_location = 0.635,
+        input_type = Acoustic.BOW,
+        input_fractional_location = 0.5,
+        input_amplitude = 1,
+        num_node = 100
     )
 
-    test_input = Input(
-    note_location = 1,
-    impulse_fractional_location = 0.5,
-    impulse_amplitude = 1,
-    simulation_period = 5
+    test_input = Simulation(
+    simulation_period = 5,
+    sampling_rate = 44100
     )
 
     test_object = Acoustic(test_design, test_material, test_tuning, test_input)
