@@ -538,18 +538,37 @@ class Acoustic:
         mode_shapes: FloatMatrix
         nat_freq: FloatMatrix
 
-        note_location: float
         input_type: int
         input_fractional_location: float
         input_amplitude: float
+
+        sampling_rate: int
+        simulation_period: float
 
         time_series_response: FloatMatrix
         diag_time_series_response: FloatMatrix
         sound_ray_traced_acoustic_response: FloatMatrix
 
+        ## FLAGS:
+        BOW = 0
+        TAP = 1
+        PLUCK = 2
+
         def __init__(self,
             connected_system_obj: ConnectedSystem,
+            input_type: int,
+            input_fractional_location: float,
+            input_amplitude: float,
+            sampling_rate: int,
+            simulation_period: float,
             ) -> None:
+
+            self.input_type = input_type
+            self.input_fractional_location = input_fractional_location
+            self.input_amplitude = input_amplitude
+            self.sampling_rate = sampling_rate
+            self.simulation_period = simulation_period
+
             global_K = connected_system_obj.global_K
             global_M = connected_system_obj.global_M
 
@@ -561,20 +580,22 @@ class Acoustic:
 
             return
 
-        def diag_state_response(self):
+        def diag_state_response(self, num_string_node: int, global_size: int, string_index_offset):
 
-            time_step = 1/self.simulation.sampling_rate
-            time_series = np.arange(0, self.simulation.simulation_period, time_step)
+            time_step = 1/self.sampling_rate
+            time_series = np.arange(0, self.simulation_period, time_step)
 
-            if self.string.input_type == Acoustic.BOW:
+            input_node_index = string_index_offset + self.input_fractional_location*num_string_node
+
+            if self.input_type == self.BOW:
                 pass
             
-            elif self.string.input_type == Acoustic.TAP:
+            elif self.input_type == self.TAP:
                 pass
 
-            elif self.string.input_type == Acoustic.PLUCK:
+            elif self.input_type == self.PLUCK:
             
-                string_local_init_vector = np.array(range(self.string.num_node))
+                string_local_init_vector = np.array(range(num_string_node))
                 string_local_init_vector_2nd_half = string_local_init_vector
 
                 slope_pre = (self.string.input_amplitude)/(self.string.input_node_index)
@@ -597,7 +618,7 @@ class Acoustic:
 
     def __init__(self, design: Geometry, material: Material, tuning: StringTuning, simulation: Simulation):
         
-        self.front_board = self.FrontBoard(
+        front_board = self.ConnectedSystem.FrontBoard(
             m = material.front_board_m,
             k = material.front_board_k,
             k_diag = material.front_board_k_diag,
@@ -606,7 +627,7 @@ class Acoustic:
             hole_pixel_data = design.holes_profile
         )
 
-        self.back_board = self.BackBoard(
+        back_board = self.ConnectedSystem.BackBoard(
             m = material.back_board_m,
             k = material.back_board_k,
             k_diag = material.back_board_k_diag,
@@ -614,19 +635,19 @@ class Acoustic:
             interior_pixel_data = design.board_profile
         )
 
-        self.bridge = self.Bridge(
+        bridge = self.ConnectedSystem.Bridge(
             K_bulk = material.bridge_k,
             M_bulk = material.bridge_m,
             bridge_location_image = design.bridge_location
         )
 
-        self.post = self.Post(
+        post = self.ConnectedSystem.Post(
             K_bulk = material.post_k,
             M_bulk = material.post_m,
             post_location_image = design.post_location
         )
 
-        self.string = self.String(
+        string = self.ConnectedSystem.String(
             string_tension = tuning.string_tension,
             string_mass_per_length = tuning.string_mass_per_length,
             note_location = tuning.note_location,
@@ -636,58 +657,9 @@ class Acoustic:
             num_node = tuning.num_node
         )
 
-        self.simulation = simulation
-
-        self.assemble_instrument()
-        self.analyze_vibration()
-
-        return
-  
-    def analyze_vibration(self):
-
-        self.nat_freq, self.mode_shapes = eig(self.global_K, self.global_M)
-        self.nat_freq = np.sqrt(self.nat_freq)
-
-    def diag_state_response(self):
-
-        time_step = 1/self.simulation.sampling_rate
-        time_series = np.arange(0, self.simulation.simulation_period, time_step)
-        
-        if self.string.input_type == Acoustic.BOW:
-            pass
-        
-        elif self.string.input_type == Acoustic.TAP:
-            pass
-
-        elif self.string.input_type == Acoustic.PLUCK:
-        
-            string_local_init_vector = np.array(range(self.string.num_node))
-            string_local_init_vector_2nd_half = string_local_init_vector
-
-            slope_pre = (self.string.input_amplitude)/(self.string.input_node_index)
-            slope_post = (-self.string.input_amplitude)/((self.string.num_node - 1) - (self.string.input_node_index + 1))
-
-
-
-            initial_condition_vector = 
-            diag_initial_condition_vector = 
-
-            input_matrix = 
-            diag_input_matrix =
 
         return
     
-    def element_response(self):
-
-        return
-    
-    def superimpose_sound_sources(self):
-        #TODO
-        return
-
-    def export_sound(self, export_path:str, input: Simulation):
-        #TODO
-        return
 
 if __name__ == "__main__":
 
