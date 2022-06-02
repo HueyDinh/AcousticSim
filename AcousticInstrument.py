@@ -498,36 +498,38 @@ class ConnectedSystem(Vibration):
         post_K = self.post.K_matrix
         string_K = self.string.K_matrix
 
-        bridge_board_spring_constant = (self.front_board.k * self.bridge.K_bulk) / (self.front_board.k + self.bridge.K_bulk) / len(self.bridge.location_tuple)
-        post_board_spring_constant = (self.front_board.k * self.post.K_bulk) / (self.front_board.k + self.post.K_bulk) / len(self.post.location_tuple)
+        bridge_front_spring_constant = (self.front_board.k * self.bridge.K_bulk) / (self.front_board.k + self.bridge.K_bulk) / len(self.bridge.location_tuple)
+        bridge_back_spring_constant = (self.back_board.k * self.bridge.K_bulk) / (self.back_board.k + self.bridge.K_bulk) / len(self.bridge.location_tuple)
+        post_front_spring_constant = (self.front_board.k * self.post.K_bulk) / (self.front_board.k + self.post.K_bulk) / len(self.post.location_tuple)
+        post_back_spring_constant = (self.back_board.k * self.post.K_bulk) / (self.back_board.k + self.post.K_bulk) / len(self.post.location_tuple)
         string_bridge_spring_constant = (self.string.eq_k * self.bridge.K_bulk) / (self.string.eq_k + self.bridge.K_bulk)
 
         bridge_front_conn = global_connection_matrix(
             self.global_size, self.front_board_index_offset, self.bridge_index_offset,
             self.front_board.interior_elements_tuple,
             self.bridge.location_tuple,
-            bridge_board_spring_constant
+            bridge_front_spring_constant
         )
 
         bridge_back_conn = global_connection_matrix(
             self.global_size, self.back_board_index_offset, self.bridge_index_offset,
             self.back_board.interior_elements_tuple,
             self.bridge.location_tuple,
-            bridge_board_spring_constant
+            bridge_back_spring_constant
         )
 
         post_front_conn = global_connection_matrix(
             self.global_size, self.front_board_index_offset, self.post_index_offset,
             self.front_board.interior_elements_tuple,
             self.post.location_tuple,
-            post_board_spring_constant
+            post_front_spring_constant
         )
 
         post_back_conn = global_connection_matrix(
             self.global_size, self.back_board_index_offset, self.post_index_offset,
             self.back_board.interior_elements_tuple,
             self.post.location_tuple,
-            post_board_spring_constant
+            post_back_spring_constant
         )
 
         string_bridge_conn = np.zeros((self.global_size, self.global_size))
@@ -682,24 +684,24 @@ class Acoustic:
 
 if __name__ == "__main__":
 
-    board_profile: Int8GreyScaleImg = cv2.imread("board.png", cv2.IMREAD_GRAYSCALE)
-    wall_profile = cv2.imread("wall.png", cv2.IMREAD_GRAYSCALE)
-    hole_profile = cv2.imread("hole.png", cv2.IMREAD_GRAYSCALE)
-    bridge_profile = cv2.imread("bridge.png", cv2.IMREAD_GRAYSCALE)
-    post_profile = cv2.imread("post.png", cv2.IMREAD_GRAYSCALE)
+    board_profile = cv2.imread("test_board.png", cv2.IMREAD_GRAYSCALE)
+    wall_profile = cv2.imread("test_wall.png", cv2.IMREAD_GRAYSCALE)
+    hole_profile = cv2.imread("test_hole.png", cv2.IMREAD_GRAYSCALE)
+    bridge_profile = cv2.imread("test_bridge.png", cv2.IMREAD_GRAYSCALE)
+    post_profile = cv2.imread("test_post.png", cv2.IMREAD_GRAYSCALE)
 
     test_material = Material(
         front_board_k = 1,
         back_board_k = 1,
-        front_board_k_diag = 0,
-        back_board_k_diag = 0,
+        front_board_k_diag = 0.1,
+        back_board_k_diag = 0.1,
         post_k = 10,
-        bridge_k = 5,
+        bridge_k = 1000,
 
-        front_board_m = 2,
-        back_board_m = 1,
-        post_m = 2,
-        bridge_m = 1,
+        front_board_m = 1,
+        back_board_m = 2,
+        post_m = 3,
+        bridge_m = 4,
 
         alpha = 0.001,
         beta = 0.002
@@ -719,7 +721,7 @@ if __name__ == "__main__":
         string_tension = 71.7846,
         string_mass_per_length = 1.140e-3,
         eff_string_length = 0.635,
-        num_node = 100
+        num_node = 3
     )
 
     test_input = NoteSimulation(
