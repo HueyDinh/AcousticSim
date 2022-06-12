@@ -1,7 +1,7 @@
 from typing import Callable
 import numpy as np
 import numpy.typing as npt
-from scipy.linalg import block_diag, eig
+from scipy.linalg import block_diag, eigh
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import cv2
@@ -66,6 +66,7 @@ class NoteSimulation:
 
     simulation_period: float
     sampling_rate: int = 44100
+    acoustic_gain: float = 1e6
 
 
 # Define Abstract Concepts
@@ -562,7 +563,6 @@ class VibrationSimulation:
     simulation_period: float
 
     time_series_response: FloatMatrix
-    element_response_functions: list[Callable]
 
     time_sampling_points: FloatMatrix
     sampling_region_response: FloatMatrix
@@ -579,6 +579,7 @@ class VibrationSimulation:
         input_amplitude: float,
         sampling_rate: int,
         simulation_period: float,
+        acoustic_gain: float
         ) -> None:
 
         self.input_type = input_type
@@ -592,7 +593,7 @@ class VibrationSimulation:
         alpha = connected_system_obj.global_alpha
         beta = connected_system_obj.global_beta
 
-        self.nat_freq, self.mode_shapes = eig(global_K, global_M)
+        self.nat_freq, self.mode_shapes = eigh(global_K, global_M)
         self.nat_freq = np.sqrt(self.nat_freq)
 
         self.state_response(
@@ -607,7 +608,8 @@ class VibrationSimulation:
         self.soundwave_creation(
             sampling_zone=connected_system_obj.front_board.hole_elements_tuple,
             back_board_object=connected_system_obj.back_board,
-            back_board_coordinate_offset=connected_system_obj.back_board_index_offset
+            back_board_coordinate_offset=connected_system_obj.back_board_index_offset,
+            gain=acoustic_gain
         )
 
         return
@@ -624,7 +626,6 @@ class VibrationSimulation:
         time_step = 1/self.sampling_rate
         time_series = np.arange(0, self.simulation_period, time_step)
         diag_signal_data = np.empty((global_size,time_series.size))
-        response_function_list = []
 
         if self.input_type == self.BOW:
             pass
@@ -638,28 +639,29 @@ class VibrationSimulation:
             slope_post = (-self.input_amplitude)/((num_string_node - 1) - (local_input_node_index + 1))
         
             string_local_init_vector_1st_half = np.array(range(local_input_node_index + 1))*slope_pre
-            string_local_init_vector_2nd_half = np.array(range(local_input_node_index + 1,num_string_node))*(slope_post - slope_pre) + self.input_amplitude
+            string_local_init_vector_2nd_half = np.array(range(0,num_string_node - local_input_node_index - 1))*(slope_post) + self.input_amplitude
 
             initial_condition_vector_local = np.concatenate((string_local_init_vector_1st_half,string_local_init_vector_2nd_half), axis=0)
             initial_condition_vector_global = np.zeros(global_size)
             initial_condition_vector_global[string_index_offset:(string_index_offset+num_string_node)] = initial_condition_vector_local
             diag_initial_condition_vector = np.linalg.inv(global_K) @ initial_condition_vector_global
 
+            response_function_template = lambda t, x0, omega, zeta, omega_d: np.exp(-zeta*omega*t)*(x0*np.cos(omega_d*t) + zeta*omega*x0/omega_d*np.sin(omega_d*t))
+
             for mode in range(global_size):
                 x0_j = diag_initial_condition_vector[mode]
                 omega_j = self.nat_freq[mode]
                 zeta_j = (alpha/omega_j + beta*omega_j)/2
                 omega_d_j = omega_j * np.sqrt(1-zeta_j**2)
-                response_function = lambda t: np.exp(-zeta_j*omega_j*t)*(x0_j*np.cos(omega_d_j*t) + zeta_j*omega_j*x0_j/omega_d_j*np.sin(omega_d_j*t))
-                response_function_list.append(response_function)
-                diag_signal_data[mode,:] = response_function(time_series)
+                diag_signal_data[mode,:] = response_function_template(time_series, x0=x0_j, omega=omega_j, zeta=zeta_j, omega_d=omega_d_j)
+                # DEBUG
+                print(f"Finished Calculating Mode {mode}")
             
             self.time_series_response = self.mode_shapes @ diag_signal_data
             self.time_sampling_points = time_series
-            self.element_response_functions = response_function_list
         return
 
-    def soundwave_creation(self, sampling_zone: CoordList, back_board_object: ConnectedSystem.BackBoard, back_board_coordinate_offset: int):
+    def soundwave_creation(self, sampling_zone: CoordList, back_board_object: ConnectedSystem.BackBoard, back_board_coordinate_offset: int, gain: float):
 
         total_response = np.zeros(self.time_sampling_points.size)
 
@@ -667,7 +669,7 @@ class VibrationSimulation:
             local_index = back_board_object.interior_elements_tuple.index(coord)
             global_index = local_index + back_board_coordinate_offset
             element_response = self.time_series_response[global_index,:]
-            total_response = total_response + element_response
+            total_response = total_response + element_response*gain
         
         self.sampling_region_response = total_response
         return
@@ -695,6 +697,7 @@ class Acoustic:
             interior_pixel_data = design.board_profile,
             hole_pixel_data = design.holes_profile
         )
+        print("Finished Creating Front Board")
 
         back_board = ConnectedSystem.BackBoard(
             m = back_board_element_mass,
@@ -703,18 +706,21 @@ class Acoustic:
             wall_pixel_data = design.wall_profile,
             interior_pixel_data = design.board_profile
         )
+        print("Finished Creating Back Board")
 
         bridge = ConnectedSystem.Bridge(
             K_bulk = material.bridge_k,
             M_bulk = material.bridge_m,
             bridge_location_image = design.bridge_location
         )
+        print("Finished Creating Bridge")
 
         post = ConnectedSystem.Post(
             K_bulk = material.post_k,
             M_bulk = material.post_m,
             post_location_image = design.post_location
         )
+        print("Finished Creating Post")
 
         string = ConnectedSystem.String(
             string_tension = tuning.string_tension,
@@ -722,6 +728,7 @@ class Acoustic:
             eff_string_length = tuning.eff_string_length,
             num_node = tuning.num_node
         )
+        print("Finished Creating String")
 
         self.global_system = ConnectedSystem(
             back_board = back_board,
@@ -732,6 +739,7 @@ class Acoustic:
             global_alpha = material.alpha,
             global_beta = material.beta
         )
+        print("Finished Creating Global System")
 
         self.system_response = VibrationSimulation(
             connected_system_obj=self.global_system,
@@ -739,71 +747,13 @@ class Acoustic:
             input_fractional_location=simulation.input_fractional_location,
             input_amplitude=simulation.input_amplitude,
             sampling_rate=simulation.sampling_rate,
-            simulation_period=simulation.simulation_period
+            simulation_period=simulation.simulation_period,
+            acoustic_gain=simulation.acoustic_gain
         )
+        print("Finish Calculating System Response")
 
         return
     
 
 if __name__ == "__main__":
-    
-    import matplotlib.pyplot as plt
-
-    board_profile = cv2.imread("board.png", cv2.IMREAD_GRAYSCALE)
-    wall_profile = cv2.imread("wall.png", cv2.IMREAD_GRAYSCALE)
-    hole_profile = cv2.imread("hole.png", cv2.IMREAD_GRAYSCALE)
-    bridge_profile = cv2.imread("bridge.png", cv2.IMREAD_GRAYSCALE)
-    post_profile = cv2.imread("post.png", cv2.IMREAD_GRAYSCALE)
-
-    test_material = Material(
-        front_board_k = 12e9,
-        back_board_k = 12e9,
-        front_board_k_diag = 12e9,
-        back_board_k_diag = 12e9,
-        post_k = 30e9,
-        bridge_k = 30e9,
-
-        front_board_density = 1500,
-        back_board_density = 1500,
-        post_m = 0.3,
-        bridge_m = 0.3,
-
-        alpha = 2.5,
-        beta = 1e-7
-    )
-
-    test_design = Geometry(
-        board_profile = board_profile,
-        wall_profile = wall_profile,
-        holes_profile = hole_profile,
-        board_thickness= 0.007,
-        chamber_height = 0.08,
-
-        bridge_location = bridge_profile,
-        post_location = post_profile,
-        meter_per_pixel= 8.33e-4
-    )
-
-    test_tuning = StringTuning(
-        string_tension = 71.7846,
-        string_mass_per_length = 1.140e-3,
-        eff_string_length = 0.635,
-        num_node = 200
-    )
-
-    test_input = NoteSimulation(
-        input_type = VibrationSimulation.PLUCK,
-        input_fractional_location = 0.2,
-        input_amplitude = 0.01,
-        simulation_period = 0.5,
-        sampling_rate = 44100
-    )
-
-    test_object = Acoustic(test_design, test_material, test_tuning, test_input)
-
-    time_sample_locations = test_object.system_response.time_sampling_points
-    signal_time_series = test_object.system_response.time_series_response
-    sample_signal = test_object.system_response.sampling_region_response
-
-    plt.plot(time_sample_locations, sample_signal)
-    plt.show(block = True)
+    pass
