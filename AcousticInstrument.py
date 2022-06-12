@@ -1,9 +1,11 @@
+from typing import Callable
 import numpy as np
 import numpy.typing as npt
 from scipy.linalg import block_diag, eig
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import cv2
+import itertools
 
 # TypeAliases
 CoordList = tuple[list[float], ...]
@@ -21,8 +23,8 @@ class Material:
     post_k: float
     bridge_k: float
 
-    front_board_m: float
-    back_board_m: float
+    front_board_density: float
+    back_board_density: float
     post_m: float
     bridge_m: float
 
@@ -36,12 +38,14 @@ class Geometry:
     board_profile: Int8GreyScaleImg
     wall_profile: Int8GreyScaleImg
     holes_profile: Int8GreyScaleImg
+    board_thickness: float
+    chamber_height: float
 
     bridge_location: Int8GreyScaleImg
     post_location: Int8GreyScaleImg
+
+    meter_per_pixel: float
     
-    wall_height: float
-    scale_factor: float
 
 
 @dataclass
@@ -61,7 +65,7 @@ class NoteSimulation:
     input_amplitude: float
 
     simulation_period: float
-    sampling_rate: float = 44100
+    sampling_rate: int = 44100
 
 
 # Define Abstract Concepts
@@ -424,13 +428,15 @@ class ConnectedSystem(Vibration):
     global_alpha: float
     global_beta: float
 
-    def __init__(self, front_board: FrontBoard, back_board: BackBoard, bridge: Bridge, post: Post, string: String) -> None:
+    def __init__(self, front_board: FrontBoard, back_board: BackBoard, bridge: Bridge, post: Post, string: String, global_alpha: float, global_beta: float) -> None:
 
         self.front_board = front_board
         self.back_board = back_board
         self.bridge = bridge
         self.post = post
         self.string = string
+        self.global_alpha = global_alpha
+        self.global_beta = global_beta
 
         self.global_indexing()
         self.assemble_M()
@@ -556,8 +562,10 @@ class VibrationSimulation:
     simulation_period: float
 
     time_series_response: FloatMatrix
-    diag_time_series_response: FloatMatrix
-    sound_ray_traced_acoustic_response: FloatMatrix
+    element_response_functions: list[Callable]
+
+    time_sampling_points: FloatMatrix
+    sampling_region_response: FloatMatrix
 
     ## FLAGS:
     BOW = 0
@@ -565,7 +573,7 @@ class VibrationSimulation:
     PLUCK = 2
 
     def __init__(self,
-        connected_system_obj: "ConnectedSystem",
+        connected_system_obj: ConnectedSystem,
         input_type: int,
         input_fractional_location: float,
         input_amplitude: float,
@@ -581,21 +589,42 @@ class VibrationSimulation:
 
         global_K = connected_system_obj.global_K
         global_M = connected_system_obj.global_M
+        alpha = connected_system_obj.global_alpha
+        beta = connected_system_obj.global_beta
 
         self.nat_freq, self.mode_shapes = eig(global_K, global_M)
-        self.nat_freq = np.math.sqrt(self.nat_freq)
+        self.nat_freq = np.sqrt(self.nat_freq)
 
-        self.diag_state_response()
-        self.element_response()
+        self.state_response(
+            global_K=global_K,
+            global_M=global_M,
+            alpha=alpha,
+            beta=beta,
+            global_size=connected_system_obj.global_size,
+            num_string_node=connected_system_obj.string.num_node,
+            string_index_offset=connected_system_obj.string_index_offset
+        )
+        self.soundwave_creation(
+            sampling_zone=connected_system_obj.front_board.hole_elements_tuple,
+            back_board_object=connected_system_obj.back_board,
+            back_board_coordinate_offset=connected_system_obj.back_board_index_offset
+        )
 
         return
 
-    def diag_state_response(self, num_string_node: int, global_size: int, string_index_offset):
+    def state_response(self, 
+                            global_K: FloatMatrix, 
+                            global_M: FloatMatrix,
+                            alpha: float,
+                            beta: float,
+                            global_size: int,
+                            num_string_node: int,
+                            string_index_offset):
 
         time_step = 1/self.sampling_rate
         time_series = np.arange(0, self.simulation_period, time_step)
-
-        input_node_index = string_index_offset + self.input_fractional_location*num_string_node
+        diag_signal_data = np.empty((global_size,time_series.size))
+        response_function_list = []
 
         if self.input_type == self.BOW:
             pass
@@ -604,27 +633,46 @@ class VibrationSimulation:
             pass
 
         elif self.input_type == self.PLUCK:
+            local_input_node_index = int(self.input_fractional_location*num_string_node)
+            slope_pre = (self.input_amplitude)/(local_input_node_index)
+            slope_post = (-self.input_amplitude)/((num_string_node - 1) - (local_input_node_index + 1))
         
-            string_local_init_vector = np.array(range(num_string_node))
-            string_local_init_vector_2nd_half = string_local_init_vector
+            string_local_init_vector_1st_half = np.array(range(local_input_node_index + 1))*slope_pre
+            string_local_init_vector_2nd_half = np.array(range(local_input_node_index + 1,num_string_node))*(slope_post - slope_pre) + self.input_amplitude
 
-            slope_pre = (self.string.input_amplitude)/(self.string.input_node_index)
-            slope_post = (-self.string.input_amplitude)/((self.string.num_node - 1) - (self.string.input_node_index + 1))
+            initial_condition_vector_local = np.concatenate((string_local_init_vector_1st_half,string_local_init_vector_2nd_half), axis=0)
+            initial_condition_vector_global = np.zeros(global_size)
+            initial_condition_vector_global[string_index_offset:(string_index_offset+num_string_node)] = initial_condition_vector_local
+            diag_initial_condition_vector = np.linalg.inv(global_K) @ initial_condition_vector_global
 
-
-
-            initial_condition_vector = 0
-            diag_initial_condition_vector = 0
-
-            input_matrix = 0
-            diag_input_matrix = 0
-
+            for mode in range(global_size):
+                x0_j = diag_initial_condition_vector[mode]
+                omega_j = self.nat_freq[mode]
+                zeta_j = (alpha/omega_j + beta*omega_j)/2
+                omega_d_j = omega_j * np.sqrt(1-zeta_j**2)
+                response_function = lambda t: np.exp(-zeta_j*omega_j*t)*(x0_j*np.cos(omega_d_j*t) + zeta_j*omega_j*x0_j/omega_d_j*np.sin(omega_d_j*t))
+                response_function_list.append(response_function)
+                diag_signal_data[mode,:] = response_function(time_series)
+            
+            self.time_series_response = self.mode_shapes @ diag_signal_data
+            self.time_sampling_points = time_series
+            self.element_response_functions = response_function_list
         return
 
-        def element_response(self):
+    def soundwave_creation(self, sampling_zone: CoordList, back_board_object: ConnectedSystem.BackBoard, back_board_coordinate_offset: int):
 
-            return
+        total_response = np.zeros(self.time_sampling_points.size)
 
+        for coord in sampling_zone:
+            local_index = back_board_object.interior_elements_tuple.index(coord)
+            global_index = local_index + back_board_coordinate_offset
+            element_response = self.time_series_response[global_index,:]
+            total_response = total_response + element_response
+        
+        self.sampling_region_response = total_response
+        return
+    
+        
 
 
 # Define Instrument
@@ -634,9 +682,13 @@ class Acoustic:
     system_response: VibrationSimulation
 
     def __init__(self, design: Geometry, material: Material, tuning: StringTuning, simulation: NoteSimulation):
+
+        board_element_volume = design.board_thickness*design.meter_per_pixel**2 
+        front_board_element_mass = material.front_board_density*board_element_volume
+        back_board_element_mass = material.back_board_density*board_element_volume
         
         front_board = ConnectedSystem.FrontBoard(
-            m = material.front_board_m,
+            m = front_board_element_mass,
             k = material.front_board_k,
             k_diag = material.front_board_k_diag,
             wall_pixel_data = design.wall_profile,
@@ -645,7 +697,7 @@ class Acoustic:
         )
 
         back_board = ConnectedSystem.BackBoard(
-            m = material.back_board_m,
+            m = back_board_element_mass,
             k = material.back_board_k,
             k_diag = material.back_board_k_diag,
             wall_pixel_data = design.wall_profile,
@@ -676,61 +728,82 @@ class Acoustic:
             front_board = front_board,
             bridge = bridge,
             post = post,
-            string = string
+            string = string,
+            global_alpha = material.alpha,
+            global_beta = material.beta
+        )
+
+        self.system_response = VibrationSimulation(
+            connected_system_obj=self.global_system,
+            input_type=VibrationSimulation.PLUCK,
+            input_fractional_location=simulation.input_fractional_location,
+            input_amplitude=simulation.input_amplitude,
+            sampling_rate=simulation.sampling_rate,
+            simulation_period=simulation.simulation_period
         )
 
         return
     
 
 if __name__ == "__main__":
+    
+    import matplotlib.pyplot as plt
 
-    board_profile = cv2.imread("test_board.png", cv2.IMREAD_GRAYSCALE)
-    wall_profile = cv2.imread("test_wall.png", cv2.IMREAD_GRAYSCALE)
-    hole_profile = cv2.imread("test_hole.png", cv2.IMREAD_GRAYSCALE)
-    bridge_profile = cv2.imread("test_bridge.png", cv2.IMREAD_GRAYSCALE)
-    post_profile = cv2.imread("test_post.png", cv2.IMREAD_GRAYSCALE)
+    board_profile = cv2.imread("board.png", cv2.IMREAD_GRAYSCALE)
+    wall_profile = cv2.imread("wall.png", cv2.IMREAD_GRAYSCALE)
+    hole_profile = cv2.imread("hole.png", cv2.IMREAD_GRAYSCALE)
+    bridge_profile = cv2.imread("bridge.png", cv2.IMREAD_GRAYSCALE)
+    post_profile = cv2.imread("post.png", cv2.IMREAD_GRAYSCALE)
 
     test_material = Material(
-        front_board_k = 1,
-        back_board_k = 1,
-        front_board_k_diag = 0.1,
-        back_board_k_diag = 0.1,
-        post_k = 10,
-        bridge_k = 1000,
+        front_board_k = 12e9,
+        back_board_k = 12e9,
+        front_board_k_diag = 12e9,
+        back_board_k_diag = 12e9,
+        post_k = 30e9,
+        bridge_k = 30e9,
 
-        front_board_m = 1,
-        back_board_m = 2,
-        post_m = 3,
-        bridge_m = 4,
+        front_board_density = 1500,
+        back_board_density = 1500,
+        post_m = 0.3,
+        bridge_m = 0.3,
 
-        alpha = 0.001,
-        beta = 0.002
+        alpha = 2.5,
+        beta = 1e-7
     )
 
     test_design = Geometry(
         board_profile = board_profile,
         wall_profile = wall_profile,
         holes_profile = hole_profile,
+        board_thickness= 0.007,
+        chamber_height = 0.08,
+
         bridge_location = bridge_profile,
         post_location = post_profile,
-        wall_height = 1,
-        scale_factor = 1
+        meter_per_pixel= 8.33e-4
     )
 
     test_tuning = StringTuning(
         string_tension = 71.7846,
         string_mass_per_length = 1.140e-3,
         eff_string_length = 0.635,
-        num_node = 3
+        num_node = 200
     )
 
     test_input = NoteSimulation(
-    input_type = VibrationSimulation.PLUCK,
-    input_fractional_location = 0.5,
-    input_amplitude = 1,
-    simulation_period = 5,
-    sampling_rate = 44100
+        input_type = VibrationSimulation.PLUCK,
+        input_fractional_location = 0.2,
+        input_amplitude = 0.01,
+        simulation_period = 0.5,
+        sampling_rate = 44100
     )
 
     test_object = Acoustic(test_design, test_material, test_tuning, test_input)
-    print()
+
+    time_sample_locations = test_object.system_response.time_sampling_points
+    signal_time_series = test_object.system_response.time_series_response
+    sample_signal = test_object.system_response.sampling_region_response
+
+    plt.plot(time_sample_locations, sample_signal)
+    plt.show(block = True)
