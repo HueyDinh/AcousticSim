@@ -1,2 +1,4 @@
 *.png
 *.xcf
+*.wav
+/__pycache__/

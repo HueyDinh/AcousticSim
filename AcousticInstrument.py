@@ -4,8 +4,6 @@ import numpy.typing as npt
 from scipy.linalg import block_diag, eigh
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-import cv2
-import itertools
 
 # TypeAliases
 CoordList = tuple[list[float], ...]
@@ -655,8 +653,8 @@ class VibrationSimulation:
                 omega_d_j = omega_j * np.sqrt(1-zeta_j**2)
                 diag_signal_data[mode,:] = response_function_template(time_series, x0=x0_j, omega=omega_j, zeta=zeta_j, omega_d=omega_d_j)
                 # DEBUG
-                print(f"Finished Calculating Mode {mode}")
-            
+                print(f"Finished Calculating Mode {mode + 1}/{global_size}", end = "\r")
+            print()
             self.time_series_response = self.mode_shapes @ diag_signal_data
             self.time_sampling_points = time_series
         return
@@ -750,7 +748,7 @@ class Acoustic:
             simulation_period=simulation.simulation_period,
             acoustic_gain=simulation.acoustic_gain
         )
-        print("Finish Calculating System Response")
+        print("Finished Calculating System Response")
 
         return
     
